@@ -55,6 +55,45 @@ def format_timestamp(timestamp_ms: int) -> str:
     return dt.strftime("%Y-%m-%d %H:%M")
 
 
+def fetch_my_issues(
+    client: YouTrackClient, fields: list[str], since: str
+) -> list[dict]:
+    """Fetch issues that the current user is involved with.
+
+    Fetches issues where the user is:
+    - Reporter (created the issue)
+    - Assignee (assigned to the issue)
+    - Mentioned (in description or comments)
+    - Subscriber (starred the issue)
+
+    Args:
+        client: YouTrack API client instance
+        fields: List of fields to fetch for each issue
+        since: Time period string (e.g., '7d', '1w', '2M')
+
+    Returns:
+        List of issue dictionaries sorted by updated time (most recent first)
+    """
+    # Validate period format
+    period = validate_period(since)
+
+    # Construct query for issues user is involved with, updated recently
+    query = f"(reporter: me or Assignee: me or mentions: me or has: star) and updated: {{minus {period}}} .. Today"
+    logger.debug(f"Query: {query}")
+
+    # Fetch all matching issues
+    issues = []
+    for issue in client.search_all_issues(
+        query=query, fields=fields, page_size=50, normalize_custom_fields=True
+    ):
+        issues.append(issue)
+
+    # Sort by updated time (most recent first)
+    issues.sort(key=lambda x: x.get("updated", 0), reverse=True)
+
+    return issues
+
+
 def main():
     """Main function to fetch and display recent YouTrack issues."""
     # Parse command-line arguments
@@ -70,9 +109,6 @@ def main():
     args = parser.parse_args()
 
     try:
-        # Validate period format
-        period = validate_period(args.since)
-
         # Initialize configuration and client
         config = Config()
         client = YouTrackClient(config)
@@ -83,12 +119,8 @@ def main():
         print(
             f"Logged in as: {user.get('fullName', user.get('login', 'Unknown'))} ({user.get('login', 'Unknown')})"
         )
-        print(f"Fetching issues from the last {period}...")
+        print(f"Fetching issues from the last {args.since}...")
         print("=" * 80)
-
-        # Construct query for issues user is involved with, updated recently
-        query = f"(reporter: me or Assignee: me or mentions: me or has: star) and updated: {{minus {period}}} .. Today"
-        logger.debug(f"Query: {query}")
 
         # Fields to fetch (including comments)
         fields = [
@@ -103,20 +135,12 @@ def main():
         ]
 
         # Fetch all matching issues
-        issues = []
         print("\nFetching issues...\n")
-
-        for issue in client.search_all_issues(
-            query=query, fields=fields, page_size=50, normalize_custom_fields=True
-        ):
-            issues.append(issue)
+        issues = fetch_my_issues(client, fields, args.since)
 
         if not issues:
             print("No issues found for the specified period.")
             return
-
-        # Sort by updated time (most recent first)
-        issues.sort(key=lambda x: x.get("updated", 0), reverse=True)
 
         print(f"Found {len(issues)} issue(s)\n")
         print("=" * 80)
