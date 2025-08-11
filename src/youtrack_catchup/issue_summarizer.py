@@ -139,13 +139,17 @@ class IssueSummarizer:
             return f"Failed to analyze issue: {str(e)}"
 
     def generate_action_items(
-        self, issues: List[Dict[str, Any]], max_items: int = 10
+        self,
+        issues: List[Dict[str, Any]],
+        max_items: int = 10,
+        user_context: Optional[str] = None,
     ) -> List[str]:
         """Generate actionable items from a list of issues.
 
         Args:
             issues: List of issue dictionaries from YouTrack
             max_items: Maximum number of action items to generate
+            user_context: Optional context about the current user
 
         Returns:
             List of action items
@@ -160,10 +164,25 @@ class IssueSummarizer:
             "When referencing specific issues in action items, preserve the markdown links in format [ISSUE-ID](url)."
         )
 
+        if user_context:
+            system_prompt += f" Current user context: {user_context}"
+
         user_prompt = (
             f"Based on these {len(issues)} YouTrack issues:\n\n"
             f"{issues_text}\n\n"
-            f"Generate up to {max_items} specific, actionable items that the user should do today. "
+            f"Generate up to {max_items} specific, actionable items that "
+        )
+
+        if user_context:
+            user_prompt += f"{user_context} should personally do today. "
+            user_prompt += "Only include tasks that this user needs to do themselves. "
+            user_prompt += (
+                "Do NOT include tasks assigned to others or tasks waiting on others. "
+            )
+        else:
+            user_prompt += "the user should do today. "
+
+        user_prompt += (
             "Format each as a clear, concise action starting with a verb. "
             "Include issue references using the markdown links provided. "
             "Prioritize by urgency and impact. "

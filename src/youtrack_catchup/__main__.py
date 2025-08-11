@@ -117,36 +117,42 @@ def init_ai_summarizer(config: Config, model: str) -> Optional[IssueSummarizer]:
 
 
 def display_ai_summary(
-    summarizer: IssueSummarizer, issues: List[Dict[str, Any]]
+    summarizer: IssueSummarizer, issues: List[Dict[str, Any]], user: Dict[str, Any]
 ) -> None:
     """Display AI-generated summary of issues.
 
     Args:
         summarizer: IssueSummarizer instance
         issues: List of issue dictionaries
+        user: Current user information
     """
     print("\n" + "=" * 80)
     print("🤖 AI-POWERED SUMMARY")
     print("=" * 80)
 
-    summary = summarizer.summarize_issues(issues)
+    user_context = f"Current user: {user.get('fullName', user.get('login', 'Unknown'))} ({user.get('login', 'Unknown')})"
+    summary = summarizer.summarize_issues(issues, user_context=user_context)
     print(f"\n{summary}\n")
 
 
 def display_action_items(
-    summarizer: IssueSummarizer, issues: List[Dict[str, Any]]
+    summarizer: IssueSummarizer, issues: List[Dict[str, Any]], user: Dict[str, Any]
 ) -> None:
     """Display AI-generated action items.
 
     Args:
         summarizer: IssueSummarizer instance
         issues: List of issue dictionaries
+        user: Current user information
     """
     print("\n" + "=" * 80)
     print("📝 PRIORITIZED ACTION ITEMS")
     print("=" * 80)
 
-    action_items = summarizer.generate_action_items(issues, max_items=10)
+    user_context = f"{user.get('fullName', user.get('login', 'Unknown'))} ({user.get('login', 'Unknown')})"
+    action_items = summarizer.generate_action_items(
+        issues, max_items=10, user_context=user_context
+    )
 
     if action_items:
         for i, item in enumerate(action_items, 1):
@@ -328,10 +334,10 @@ def main():
         # Display AI-powered features if requested and available
         if summarizer:
             if args.summarize:
-                display_ai_summary(summarizer, issues)
+                display_ai_summary(summarizer, issues, user)
 
             if args.actions:
-                display_action_items(summarizer, issues)
+                display_action_items(summarizer, issues, user)
 
             if args.analyze:
                 analyze_specific_issue(summarizer, issues, args.analyze)
