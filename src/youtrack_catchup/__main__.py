@@ -5,9 +5,12 @@ import logging
 import re
 import sys
 from datetime import datetime
+from typing import Optional, List, Dict, Any
 
 from .api_client import YouTrackClient, YouTrackAPIError
 from .config import Config
+from .llm_provider import OpenAIProvider
+from .issue_summarizer import IssueSummarizer
 
 
 logging.basicConfig(
@@ -94,6 +97,94 @@ def fetch_my_issues(
     return issues
 
 
+def init_ai_summarizer(config: Config, model: str) -> Optional[IssueSummarizer]:
+    """Initialize AI summarizer if OpenAI key is available.
+
+    Args:
+        config: Configuration object
+        model: LLM model to use
+
+    Returns:
+        IssueSummarizer instance or None if OpenAI key not available
+    """
+    try:
+        if hasattr(config, "openai_api_key") and config.openai_api_key:
+            llm_provider = OpenAIProvider(config.openai_api_key, model=model)
+            return IssueSummarizer(llm_provider, base_url=config.base_url)
+    except Exception as e:
+        logger.warning(f"Could not initialize AI features: {e}")
+    return None
+
+
+def display_ai_summary(
+    summarizer: IssueSummarizer, issues: List[Dict[str, Any]]
+) -> None:
+    """Display AI-generated summary of issues.
+
+    Args:
+        summarizer: IssueSummarizer instance
+        issues: List of issue dictionaries
+    """
+    print("\n" + "=" * 80)
+    print("🤖 AI-POWERED SUMMARY")
+    print("=" * 80)
+
+    summary = summarizer.summarize_issues(issues)
+    print(f"\n{summary}\n")
+
+
+def display_action_items(
+    summarizer: IssueSummarizer, issues: List[Dict[str, Any]]
+) -> None:
+    """Display AI-generated action items.
+
+    Args:
+        summarizer: IssueSummarizer instance
+        issues: List of issue dictionaries
+    """
+    print("\n" + "=" * 80)
+    print("📝 PRIORITIZED ACTION ITEMS")
+    print("=" * 80)
+
+    action_items = summarizer.generate_action_items(issues, max_items=10)
+
+    if action_items:
+        for i, item in enumerate(action_items, 1):
+            print(f"\n  {i}. [ ] {item}")
+        print()
+    else:
+        print("\nNo action items generated.\n")
+
+
+def analyze_specific_issue(
+    summarizer: IssueSummarizer, issues: List[Dict[str, Any]], issue_id: str
+) -> None:
+    """Analyze a specific issue in detail.
+
+    Args:
+        summarizer: IssueSummarizer instance
+        issues: List of issue dictionaries
+        issue_id: Issue ID to analyze
+    """
+    # Find the issue
+    issue = None
+    for i in issues:
+        if i.get("idReadable", "").lower() == issue_id.lower():
+            issue = i
+            break
+
+    if not issue:
+        print(f"\n❌ Issue '{issue_id}' not found in the fetched issues.")
+        return
+
+    print("\n" + "=" * 80)
+    print(f"🔍 DETAILED ANALYSIS: {issue_id}")
+    print("=" * 80)
+
+    analysis = summarizer.analyze_issue(issue, analysis_type="general")
+    print(f"\n{analysis}\n")
+
+
 def main():
     """Main function to fetch and display recent YouTrack issues."""
     # Parse command-line arguments
@@ -105,6 +196,28 @@ def main():
         type=str,
         default="1w",
         help="Time period to look back (e.g., '7d', '1w', '2M', '1y 2M'). Default: 1w",
+    )
+    parser.add_argument(
+        "--summarize",
+        action="store_true",
+        help="Generate an AI-powered summary of all issues",
+    )
+    parser.add_argument(
+        "--actions",
+        action="store_true",
+        help="Generate a list of prioritized action items",
+    )
+    parser.add_argument(
+        "--analyze",
+        type=str,
+        metavar="ISSUE_ID",
+        help="Analyze a specific issue in detail (e.g., 'PROJECT-123')",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="gpt-4o-mini",
+        help="LLM model to use for AI features (default: gpt-4o-mini)",
     )
     args = parser.parse_args()
 
@@ -202,6 +315,26 @@ def main():
             print("-" * 80)
 
         print(f"\n✅ Total issues requiring attention: {len(issues)}")
+
+        # Initialize AI summarizer if needed
+        summarizer = None
+        if args.summarize or args.actions or args.analyze:
+            summarizer = init_ai_summarizer(config, args.model)
+            if not summarizer:
+                print(
+                    "\n⚠️  AI features unavailable. Please set OPEN_AI_TOKEN in your .env file."
+                )
+
+        # Display AI-powered features if requested and available
+        if summarizer:
+            if args.summarize:
+                display_ai_summary(summarizer, issues)
+
+            if args.actions:
+                display_action_items(summarizer, issues)
+
+            if args.analyze:
+                analyze_specific_issue(summarizer, issues, args.analyze)
 
     except ValueError as e:
         logger.error(f"Configuration error: {e}")
