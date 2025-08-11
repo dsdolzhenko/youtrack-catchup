@@ -1,0 +1,22 @@
+[project]
+name = "youtrack-catchup"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Dmitry Dolzhenko",email = "mailbox@dolzhenko.me"}
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "python-dotenv (>=1.1.1,<2.0.0)",
+    "openai (>=1.99.6,<2.0.0)",
+    "requests (>=2.32.4,<3.0.0)"
+]
+
+[tool.poetry]
+packages = [{include = "youtrack_catchup", from = "src"}]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
