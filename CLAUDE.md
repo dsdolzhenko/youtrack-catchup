@@ -55,6 +55,9 @@ poetry update
 
 # Build the package
 poetry build
+
+# Format the code
+poetry run ruff
 ```
 
 ## Testing
