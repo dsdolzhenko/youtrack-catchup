@@ -18,6 +18,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Suppress httpx INFO logs (from OpenAI client)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 def validate_period(period: str) -> str:
     """Validate period string format for YouTrack.
