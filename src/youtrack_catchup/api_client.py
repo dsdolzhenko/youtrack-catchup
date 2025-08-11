@@ -383,3 +383,38 @@ class YouTrackClient:
             issue = self._normalize_custom_fields(issue)
 
         return issue
+
+    def get_current_user(
+        self,
+        fields: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Get the current authenticated user's information.
+
+        Args:
+            fields: List of fields to return. If None, YouTrack returns default fields.
+                   Common fields include: id, login, fullName, email, avatarUrl, banned,
+                   online, guest, jabberAccountName, ringId, tags(id,name), profiles(general(locale,dateFieldFormat))
+
+        Returns:
+            Dictionary containing user information
+
+        Raises:
+            YouTrackAPIError: If API error occurs
+
+        Example:
+            >>> client = YouTrackClient()
+            >>> user = client.get_current_user(fields=["id", "login", "fullName", "email"])
+            >>> print(f"Logged in as: {user['fullName']} ({user['login']})")
+        """
+        # Build fields parameter
+        fields_param = self._build_fields_param(fields)
+
+        params = {}
+        if fields_param:
+            params["fields"] = fields_param
+
+        # Make API request
+        logger.debug("Fetching current user information")
+        user = self._make_request("GET", "users/me", params=params)
+
+        return user
