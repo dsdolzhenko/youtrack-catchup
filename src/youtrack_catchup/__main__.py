@@ -1,8 +1,10 @@
 """Main entry point for YouTrack Catchup CLI."""
 
+import argparse
 import logging
+import re
 import sys
-from pprint import pprint
+from datetime import datetime
 
 from .api_client import YouTrackClient, YouTrackAPIError
 from .config import Config
@@ -14,117 +16,184 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def validate_period(period: str) -> str:
+    """Validate period string format for YouTrack.
+
+    Args:
+        period: Period string like '7d', '1w', '1M', '1y 2M 1w'
+
+    Returns:
+        Validated and stripped period string
+
+    Raises:
+        ValueError: If period format is invalid
+    """
+    # Basic validation - YouTrack will handle the actual parsing
+    # Supports: y (years), M (months), w (weeks), d (days), h (hours), m (minutes)
+    pattern = r"^(\d+[yMwdhm]\s*)+$"
+    period = period.strip()
+    if not re.match(pattern, period):
+        raise ValueError(
+            f"Invalid period format: '{period}'. "
+            f"Use formats like '7d', '1w', '2M', '1y', or '1y 2M 1w'"
+        )
+    return period
+
+
+def format_timestamp(timestamp_ms: int) -> str:
+    """Format timestamp from milliseconds to readable string.
+
+    Args:
+        timestamp_ms: Timestamp in milliseconds
+
+    Returns:
+        Formatted date string
+    """
+    if not timestamp_ms:
+        return "N/A"
+    dt = datetime.fromtimestamp(timestamp_ms / 1000)
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+
 def main():
-    """Main function to demonstrate YouTrack API client usage."""
+    """Main function to fetch and display recent YouTrack issues."""
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="Catch up on recent YouTrack issues requiring your attention"
+    )
+    parser.add_argument(
+        "--since",
+        type=str,
+        default="1w",
+        help="Time period to look back (e.g., '7d', '1w', '2M', '1y 2M'). Default: 1w",
+    )
+    args = parser.parse_args()
+
     try:
+        # Validate period format
+        period = validate_period(args.since)
+
         # Initialize configuration and client
         config = Config()
         client = YouTrackClient(config)
 
-        print(f"Connected to YouTrack at: {config.base_url}\n")
-
-        # Example 1: Search for unresolved issues assigned to current user
-        print("=" * 60)
-        print("Example 1: Fetching first 5 unresolved issues for current user")
-        print("=" * 60)
-
-        result = client.search_issues(
-            query="for: me #Unresolved",
-            fields=[
-                "idReadable",
-                "summary",
-                "created",
-                "updated",
-                "customFields(name,value(name))",
-            ],
-            top=5,
-        )
-
+        # Get current user info
+        print(f"Connected to YouTrack at: {config.base_url}")
+        user = client.get_current_user(fields=["login", "fullName", "email"])
         print(
-            f"\nFound {len(result['issues'])} issues (has_more: {result['has_more']})\n"
+            f"Logged in as: {user.get('fullName', user.get('login', 'Unknown'))} ({user.get('login', 'Unknown')})"
         )
+        print(f"Fetching issues from the last {period}...")
+        print("=" * 80)
 
-        for issue in result["issues"]:
-            print(f"Issue: {issue.get('idReadable', issue.get('id'))}")
-            print(f"  Summary: {issue.get('summary', 'N/A')}")
-            print(f"  Created: {issue.get('created', 'N/A')}")
+        # Construct query for issues user is involved with, updated recently
+        query = f"(reporter: me or Assignee: me or mentions: me or has: star) and updated: {{minus {period}}} .. Today"
+        logger.debug(f"Query: {query}")
 
+        # Fields to fetch (including comments)
+        fields = [
+            "idReadable",
+            "summary",
+            "description",
+            "created",
+            "updated",
+            "resolved",
+            "customFields(name,value(name,login))",
+            "comments(id,text,created,author(login,fullName))",
+        ]
+
+        # Fetch all matching issues
+        issues = []
+        print("\nFetching issues...\n")
+
+        for issue in client.search_all_issues(
+            query=query, fields=fields, page_size=50, normalize_custom_fields=True
+        ):
+            issues.append(issue)
+
+        if not issues:
+            print("No issues found for the specified period.")
+            return
+
+        # Sort by updated time (most recent first)
+        issues.sort(key=lambda x: x.get("updated", 0), reverse=True)
+
+        print(f"Found {len(issues)} issue(s)\n")
+        print("=" * 80)
+
+        # Display each issue
+        for issue in issues:
+            # Basic info
+            issue_id = issue.get("idReadable", issue.get("id", "Unknown"))
+            summary = issue.get("summary", "No summary")
+            created = format_timestamp(issue.get("created"))
+            updated = format_timestamp(issue.get("updated"))
+            resolved = (
+                format_timestamp(issue.get("resolved"))
+                if issue.get("resolved")
+                else "Unresolved"
+            )
+
+            print(f"\n📋 {issue_id}: {summary}")
+            print(f"   Created: {created} | Updated: {updated} | Resolved: {resolved}")
+
+            # Custom fields (State, Priority, Type, etc.)
             if "custom_fields" in issue:
                 cf = issue["custom_fields"]
-                print(f"  State: {cf.get('State', 'N/A')}")
-                print(f"  Priority: {cf.get('Priority', 'N/A')}")
-                print(f"  Type: {cf.get('Type', 'N/A')}")
-            print()
+                state = cf.get("State", "N/A")
+                priority = cf.get("Priority", "N/A")
+                issue_type = cf.get("Type", "N/A")
+                assignee = cf.get("Assignee", "Unassigned")
 
-        # Example 2: Using the generator to fetch all issues with a limit
-        print("=" * 60)
-        print("Example 2: Using generator to fetch issues")
-        print("=" * 60)
+                print(f"   State: {state} | Priority: {priority} | Type: {issue_type}")
+                print(f"   Assignee: {assignee}")
 
-        print("\nFetching up to 10 issues using generator:")
-        count = 0
-        for issue in client.search_all_issues(
-            query="for: me",
-            fields=["idReadable", "summary"],
-            page_size=3,  # Small page size to demonstrate pagination
-            max_results=10,
-        ):
-            count += 1
-            print(
-                f"  {count}. {issue.get('idReadable', issue.get('id'))}: {issue.get('summary', 'N/A')[:50]}..."
-            )
+            # Description preview
+            description = issue.get("description", "")
+            if description:
+                # Show first 200 characters of description
+                desc_preview = description[:200].replace("\n", " ")
+                if len(description) > 200:
+                    desc_preview += "..."
+                print(f"   Description: {desc_preview}")
 
-        print(f"\nTotal issues fetched: {count}")
+            # Comments
+            comments = issue.get("comments", [])
+            if comments:
+                print(f"   💬 Comments ({len(comments)}):")
+                # Show last 3 comments
+                for comment in comments[-3:]:
+                    author = comment.get("author", {})
+                    author_name = author.get("fullName", author.get("login", "Unknown"))
+                    comment_date = format_timestamp(comment.get("created"))
+                    comment_text = comment.get("text", "")
 
-        # Example 3: Get a specific issue (if you know an issue ID)
-        print("\n" + "=" * 60)
-        print("Example 3: Fetching a specific issue (if available)")
-        print("=" * 60)
+                    if comment_text:
+                        # Show first 150 characters of comment
+                        text_preview = comment_text[:150].replace("\n", " ")
+                        if len(comment_text) > 150:
+                            text_preview += "..."
+                        print(f"      • {author_name} ({comment_date}): {text_preview}")
 
-        # Try to get the first issue from our search results
-        if result["issues"]:
-            first_issue_id = result["issues"][0].get("idReadable") or result["issues"][
-                0
-            ].get("id")
-            print(f"\nFetching details for issue: {first_issue_id}")
+            print("-" * 80)
 
-            issue = client.get_issue(
-                issue_id=first_issue_id,
-                fields=[
-                    "idReadable",
-                    "summary",
-                    "description",
-                    "customFields(name,value(name))",
-                ],
-            )
-
-            print("\nIssue details:")
-            print(f"  ID: {issue.get('idReadable', issue.get('id'))}")
-            print(f"  Summary: {issue.get('summary', 'N/A')}")
-            print(
-                f"  Description: {(issue.get('description', 'N/A') or 'N/A')[:100]}..."
-            )
-
-            if "custom_fields" in issue:
-                print("\n  Custom fields:")
-                for field_name, field_value in issue["custom_fields"].items():
-                    print(f"    {field_name}: {field_value}")
+        print(f"\n✅ Total issues requiring attention: {len(issues)}")
 
     except ValueError as e:
         logger.error(f"Configuration error: {e}")
-        print(f"\nConfiguration error: {e}")
+        print(f"\n❌ Configuration error: {e}")
         print("Please ensure your .env file contains YOUTRACK_URL and YOUTRACK_TOKEN")
         sys.exit(1)
 
     except YouTrackAPIError as e:
         logger.error(f"API error: {e}")
-        print(f"\nAPI error: {e}")
+        print(f"\n❌ API error: {e}")
         print("Please check your YouTrack URL and authentication token")
         sys.exit(1)
 
     except Exception as e:
         logger.exception("Unexpected error occurred")
-        print(f"\nUnexpected error: {e}")
+        print(f"\n❌ Unexpected error: {e}")
         sys.exit(1)
 
 
