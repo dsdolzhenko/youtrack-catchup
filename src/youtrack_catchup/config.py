@@ -24,6 +24,7 @@ class Config:
 
         self.base_url = self._get_required_env("YOUTRACK_URL")
         self.token = self._get_required_env("YOUTRACK_TOKEN")
+        self.openai_api_key = self._get_required_env("OPEN_AI_TOKEN")
 
         # API defaults
         self.default_page_size = 50
